@@ -820,6 +820,8 @@ client.on("interactionCreate", async (interaction) => {
   }
 
   if (interaction.commandName === "updatewhitelistminimum") {
+    if (!interaction.isChatInputCommand()) return;  // Add this type guard
+    
     if (!hasAdminRole(interaction.member)) {
       await interaction.reply({
         content: "You don't have permission to use this command.",
@@ -828,17 +830,12 @@ client.on("interactionCreate", async (interaction) => {
       return;
     }
 
-    const newMinimum = interaction.options.getInteger("minimum");
-    const team = interaction.options.getString("team");
-    const role = interaction.options.getString("role");
+    const newMinimum = interaction.options.getInteger("minimum", true); // added true for required
+    const team = interaction.options.getString("team", true); // added true for required
+    const role = interaction.options.getString("role", true); // added true for required
 
-    if (!newMinimum || newMinimum <= 0) {
+    if (newMinimum <= 0) {
       await interaction.reply("Please provide a valid positive integer for the new minimum.");
-      return;
-    }
-
-    if (!team || !role) {
-      await interaction.reply("Please provide both team and role options.");
       return;
     }
 
@@ -854,13 +851,12 @@ client.on("interactionCreate", async (interaction) => {
 
     await interaction.reply(`${team} team ${role} threshold updated to ${newMinimum} MOOLA.`);
 
-    // Trigger an immediate role update
     const guild = interaction.guild;
     if (guild) {
       await updateRoles(guild);
       await interaction.followUp("Roles have been updated based on the new minimum.");
     }
-  }
+}
 
   if (interaction.commandName === "updatewallet") {
     await handleUpdateWallet(interaction);
@@ -885,21 +881,22 @@ client.on("interactionCreate", async (interaction) => {
 
   async function removeRolesAndAddTeam(teamRole: Role, teamName: string) {
     // Remove the Mootard role
-    if (roles.cache.has(MOOTARD_ROLE_ID)) {
-      if (mootardRole) {
-        await roles.remove(mootardRole);
-      }
+    if (roles.cache.has(MOOTARD_ROLE_ID) && mootardRole) {
+      await roles.remove([mootardRole]);
     }
 
     // Remove the opposite team role if present
-    const oppositeRoleId =
-      teamRole.id === BULL_ROLE_ID ? BEAR_ROLE_ID : BULL_ROLE_ID;
+    const oppositeRoleId = teamRole.id === BULL_ROLE_ID ? BEAR_ROLE_ID : BULL_ROLE_ID;
     if (roles.cache.has(oppositeRoleId)) {
-      await roles.remove(oppositeRoleId === BULL_ROLE_ID ? bullRole : bearRole);
+      if (oppositeRoleId === BULL_ROLE_ID && bullRole) {
+        await roles.remove([bullRole]);
+      } else if (bearRole) {
+        await roles.remove([bearRole]);
+      }
     }
 
     // Add the new team role
-    await roles.add(teamRole);
+    await roles.add([teamRole]);
 
     // Update the user's team in the database
     const { error } = await supabase
@@ -919,7 +916,7 @@ client.on("interactionCreate", async (interaction) => {
     }
 
     return true;
-  }
+}
 
   if (interaction.customId === "bullButton") {
     if (await removeRolesAndAddTeam(bullRole, "bullas")) {
