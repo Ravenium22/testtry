@@ -180,7 +180,7 @@ async function updateRoles(guild: Guild) {
   console.log("Starting enhanced role update process...");
   
   // Get team totals to determine winning/losing team
-  const teamPoints = await getTeamPoints();
+  const teamPoints = await getFilteredTeamPoints();
   const winningTeam = teamPoints.bullas > teamPoints.beras ? 'bullas' : 'beras';
   
   // Fetch all role objects
@@ -374,13 +374,34 @@ const commands = [
         .setDescription("The amount to fine")
         .setRequired(true)
     ),
-  new SlashCommandBuilder()
+    new SlashCommandBuilder()
     .setName("updatewhitelistminimum")
     .setDescription("Update the whitelist minimum")
     .addIntegerOption((option) =>
       option
         .setName("minimum")
         .setDescription("The new minimum value")
+        .setRequired(true)
+    )
+    .addStringOption((option) =>
+      option
+        .setName("team")
+        .setDescription("The team to update (winning/losing)")
+        .addChoices(
+          { name: 'Winning Team', value: 'winning' },
+          { name: 'Losing Team', value: 'losing' }
+        )
+        .setRequired(true)
+    )
+    .addStringOption((option) =>
+      option
+        .setName("role")
+        .setDescription("The role to update")
+        .addChoices(
+          { name: 'Whitelist', value: 'whitelist' },
+          { name: 'Moolalist', value: 'moolalist' },
+          { name: 'Free Mint', value: 'freemint' }
+        )
         .setRequired(true)
     ),
   new SlashCommandBuilder()
@@ -701,7 +722,7 @@ client.on("interactionCreate", async (interaction) => {
     await interaction.deferReply();
 
     try {
-      const teamPoints = await getTeamPoints();
+      const teamPoints = await getFilteredTeamPoints();
       const winningTeam = teamPoints.bullas > teamPoints.beras ? "bullas" : "beras";
       const losingTeam = winningTeam === "bullas" ? "beras" : "bullas";
 
@@ -807,26 +828,31 @@ client.on("interactionCreate", async (interaction) => {
       return;
     }
 
-    const newMinimum = interaction.options.get("minimum")?.value as number;
+    const newMinimum = interaction.options.getInteger("minimum");
+    const team = interaction.options.getString("team");
+    const role = interaction.options.getString("role");
+
     if (!newMinimum || newMinimum <= 0) {
       await interaction.reply("Please provide a valid positive integer for the new minimum.");
       return;
     }
 
-    const teamOption = interaction.options.getString("team");
-    const roleOption = interaction.options.getString("role");
-
-    if (teamOption === "winning") {
-      if (roleOption === "whitelist") winningTeamThresholds.whitelist = newMinimum;
-      else if (roleOption === "moolalist") winningTeamThresholds.moolalist = newMinimum;
-      else if (roleOption === "freemint") winningTeamThresholds.freeMint = newMinimum;
-    } else if (teamOption === "losing") {
-      if (roleOption === "whitelist") losingTeamThresholds.whitelist = newMinimum;
-      else if (roleOption === "moolalist") losingTeamThresholds.moolalist = newMinimum;
-      else if (roleOption === "freemint") losingTeamThresholds.freeMint = newMinimum;
+    if (!team || !role) {
+      await interaction.reply("Please provide both team and role options.");
+      return;
     }
 
-    await interaction.reply(`Role threshold updated to ${newMinimum} MOOLA.`);
+    if (team === "winning") {
+      if (role === "whitelist") winningTeamThresholds.whitelist = newMinimum;
+      else if (role === "moolalist") winningTeamThresholds.moolalist = newMinimum;
+      else if (role === "freemint") winningTeamThresholds.freeMint = newMinimum;
+    } else if (team === "losing") {
+      if (role === "whitelist") losingTeamThresholds.whitelist = newMinimum;
+      else if (role === "moolalist") losingTeamThresholds.moolalist = newMinimum;
+      else if (role === "freemint") losingTeamThresholds.freeMint = newMinimum;
+    }
+
+    await interaction.reply(`${team} team ${role} threshold updated to ${newMinimum} MOOLA.`);
 
     // Trigger an immediate role update
     const guild = interaction.guild;
@@ -860,7 +886,9 @@ client.on("interactionCreate", async (interaction) => {
   async function removeRolesAndAddTeam(teamRole: Role, teamName: string) {
     // Remove the Mootard role
     if (roles.cache.has(MOOTARD_ROLE_ID)) {
-      await roles.remove(mootardRole as RoleResolvable);
+      if (mootardRole) {
+        await roles.remove(mootardRole);
+      }
     }
 
     // Remove the opposite team role if present
