@@ -929,7 +929,15 @@ client.on("guildMemberAdd", async (member) => {
 });
 
 client.login(discordBotToken);
+client.on('error', error => {
+  console.error('Discord client error:', error);
+});
 
+client.login(discordBotToken).then(() => {
+  console.log('Successfully logged in to Discord!');
+}).catch(error => {
+  console.error('Failed to log in to Discord:', error);
+});
 /*
 #############################################
 #
