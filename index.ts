@@ -30,7 +30,8 @@ import { v4 } from "uuid";
 import { Database } from "./types/supabase";
 
 // Discord IDs to exclude from calculations
-const EXCLUDED_USERS = ['abarat', 'rxx', 'yeshy.smol'].map(username => username.toLowerCase());
+const EXCLUDED_USERS = ['649377665496776724', '534027215973646346', '144683637718122496'];
+
 
 let projects: string[] = [];
 
@@ -112,19 +113,37 @@ function hasAdminRole(member: GuildMember | APIInteractionGuildMember | null) {
 
 // Enhanced team points calculation
 async function getFilteredTeamPoints() {
-  const bullasPoints = await supabase.rpc("sum_points_for_team", { 
-    team_name: "bullas" 
-  }).not("discord_id", "in", EXCLUDED_USERS);
+  // Fetch all users for Bullas
+  const { data: bullasData, error: bullasError } = await supabase
+    .from("users")
+    .select("points")
+    .eq("team", "bullas")
+    .not("discord_id", "in", EXCLUDED_USERS);
 
-  const berasPoints = await supabase.rpc("sum_points_for_team", { 
-    team_name: "beras" 
-  }).not("discord_id", "in", EXCLUDED_USERS);
+  if (bullasError) {
+    console.error("Error fetching Bullas points:", bullasError);
+    throw bullasError;
+  }
 
-  return {
-    bullas: bullasPoints.data ?? 0,
-    beras: berasPoints.data ?? 0
-  };
+  // Fetch all users for Beras
+  const { data: berasData, error: berasError } = await supabase
+    .from("users")
+    .select("points")
+    .eq("team", "beras")
+    .not("discord_id", "in", EXCLUDED_USERS);
+
+  if (berasError) {
+    console.error("Error fetching Beras points:", berasError);
+    throw berasError;
+  }
+
+  // Sum points 
+  const bullas = bullasData.reduce((acc, user) => acc + (user.points || 0), 0);
+  const beras = berasData.reduce((acc, user) => acc + (user.points || 0), 0);
+
+  return { bullas, beras };
 }
+
 
 // New function to get top players
 async function getTopPlayers(team: string, limit: number) {
@@ -242,23 +261,28 @@ async function updateRoles(guild: Guild) {
 
 // Updated function to get filtered leaderboard
 async function getFilteredLeaderboard(limit: number = 10, team?: string) {
-  const query = supabase
+  let query = supabase
     .from("users")
     .select("discord_id, points, team")
     .not("discord_id", "is", null)
     .not("discord_id", "in", EXCLUDED_USERS);
 
   if (team) {
-    query.eq("team", team);
+    query = query.eq("team", team);
   }
 
   const { data, error } = await query
     .order("points", { ascending: false })
     .limit(limit);
 
-  if (error) throw error;
+  if (error) {
+    console.error("Error fetching leaderboard:", error);
+    throw error;
+  }
+
   return data;
 }
+
 
 // Wallet update handler
 async function handleUpdateWallet(interaction: CommandInteraction) {
@@ -553,15 +577,14 @@ client.on("interactionCreate", async (interaction) => {
       return;
     }
 
-    const { error } = await supabase
+    const { data, error } = await supabase
       .from("tokens")
-      .insert({ token: uuid, discord_id: userId, used: false })
-      .single();
+      .insert({ token: uuid, discord_id: userId, used: false });
 
     if (error) {
-      console.error("Error inserting token:", error);
+      console.error("Supabase Error:", error); // Added detailed error logging
       await interaction.reply({
-        content: "An error occurred while generating the token.",
+        content: `Error: ${error.message}`, // Show the actual error message
         ephemeral: true,
       });
     } else {
@@ -571,7 +594,7 @@ client.on("interactionCreate", async (interaction) => {
         ephemeral: true,
       });
     }
-  }
+}
 
   if (interaction.commandName === "moola") {
     const userId = interaction.user.id;
@@ -653,8 +676,10 @@ client.on("interactionCreate", async (interaction) => {
 
   if (interaction.commandName === "warstatus") {
     try {
+      console.log("Fetching war status data...");
       const teamPoints = await getFilteredTeamPoints();
-
+      console.log(`Bullas Points: ${teamPoints.bullas}, Beras Points: ${teamPoints.beras}`);
+  
       const embed = new EmbedBuilder()
         .setTitle("🏆 Moola War Status")
         .setDescription("Current team standings (excluding admin accounts)")
@@ -672,8 +697,9 @@ client.on("interactionCreate", async (interaction) => {
         )
         .setColor("#FF0000")
         .setTimestamp();
-
+  
       await interaction.reply({ embeds: [embed] });
+      console.log("Warstatus command executed successfully.");
     } catch (error) {
       console.error("Error fetching war status:", error);
       await interaction.reply(
@@ -681,27 +707,42 @@ client.on("interactionCreate", async (interaction) => {
       );
     }
   }
+  
 
   if (interaction.commandName === "leaderboard") {
     try {
+      console.log("Fetching leaderboard data...");
       const data = await getFilteredLeaderboard(10);
-
+      console.log(`Fetched ${data.length} leaderboard entries.`);
+  
       const leaderboardEmbed = new EmbedBuilder()
         .setTitle("🏆 Moola Leaderboard")
         .setColor("#FFD700");
-
+  
       for (const [index, entry] of data.entries()) {
-        const user = await client.users.fetch(entry.discord_id as string);
-        const userMention = user ? `<@${user.id}>` : "Unknown User";
-
+        let userMention = "Unknown User";
+        let username = "Unknown User";
+  
+        try {
+          const user = await client.users.fetch(entry.discord_id as string);
+          if (user) {
+            userMention = `<@${user.id}>`;
+            username = user.username;
+            console.log(`Fetched user: ${username}`);
+          }
+        } catch (err) {
+          console.error(`Error fetching user ${entry.discord_id}:`, err);
+        }
+  
         leaderboardEmbed.addFields({
-          name: `${index + 1}. ${user.username}`,
+          name: `${index + 1}. ${userMention}`,
           value: ` 🍯 ${entry.points} mL`,
           inline: false,
         });
       }
-
+  
       await interaction.reply({ embeds: [leaderboardEmbed] });
+      console.log("Leaderboard command executed successfully.");
     } catch (error) {
       console.error("Error handling leaderboard command:", error);
       await interaction.reply(
@@ -709,6 +750,7 @@ client.on("interactionCreate", async (interaction) => {
       );
     }
   }
+  
 
   if (interaction.commandName === "snapshot") {
     if (!hasAdminRole(interaction.member)) {
@@ -951,11 +993,6 @@ client.on("guildMemberAdd", async (member) => {
     await member.roles.add(mootardRole);
     console.log(`Added Mootard role to new member: ${member.user.tag}`);
   }
-});
-
-client.login(discordBotToken);
-client.on('error', error => {
-  console.error('Discord client error:', error);
 });
 
 client.login(discordBotToken).then(() => {
