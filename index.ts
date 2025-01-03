@@ -18,6 +18,7 @@ import {
   RoleResolvable,
   Routes,
   SlashCommandBuilder,
+  ButtonInteraction,
 } from "discord.js";
 import "dotenv/config";
 import express from "express";
@@ -409,6 +410,7 @@ async function handleUpdateWallet(interaction: CommandInteraction) {
   });
 }
 
+// Team command handler
 async function handleTeamCommand(interaction: CommandInteraction) {
   if (!interaction.guild) return;
   const userId = interaction.user.id;
@@ -533,159 +535,49 @@ async function handleTeamCommand(interaction: CommandInteraction) {
   });
 }
 
-// Your provided handleLeaderboard function
+// Leaderboard command handler
 async function handleLeaderboard(interaction: CommandInteraction) {
   if (!interaction.isChatInputCommand()) return;
 
   try {
-      const team = interaction.options.getString("team") || "all";
-      const page = interaction.options.getInteger("page") || 1;
-      const offset = (page - 1) * ITEMS_PER_PAGE;
-
-      // Fetch total count for pagination
-      let countQuery = supabase
-          .from('users')
-          .select('*', { count: 'exact', head: true })
-          .not('discord_id', 'is', null);
-
-      // Fetch data for current page
-      let dataQuery = supabase
-          .from('users')
-          .select('discord_id, points, team')
-          .not('discord_id', 'is', null);
-
-      // Apply team filter if specified
-      if (team !== "all") {
-          countQuery = countQuery.eq('team', team);
-          dataQuery = dataQuery.eq('team', team);
-      }
-
-      // Apply excluded users filter
-      EXCLUDED_USERS.forEach(userId => {
-          countQuery = countQuery.neq('discord_id', userId);
-          dataQuery = dataQuery.neq('discord_id', userId);
-      });
-
-      // Execute both queries
-      const [countResult, dataResult] = await Promise.all([
-          countQuery,
-          dataQuery
-              .order('points', { ascending: false })
-              .range(offset, offset + ITEMS_PER_PAGE - 1)
-      ]);
-
-      if (countResult.error || dataResult.error) {
-          throw new Error(countResult.error?.message || dataResult.error?.message);
-      }
-
-      const totalCount = countResult.count || 0;
-      const totalPages = Math.ceil(totalCount / ITEMS_PER_PAGE);
-      const data = dataResult.data || [];
-
-      // Create embed
-      const leaderboardEmbed = new EmbedBuilder()
-          .setColor(0xffd700)
-          .setTitle(`🏆 ${team === 'all' ? 'Overall' : capitalizeFirstLetter(team)} Leaderboard`)
-          .setFooter({ text: `Page ${page} of ${totalPages} • Total Players: ${totalCount}` });
-
-      // Add fields for each player
-      for (const [index, entry] of data.entries()) {
-          const position = offset + index + 1;
-          try {
-              const user = await client.users.fetch(entry.discord_id as string);
-              leaderboardEmbed.addFields({
-                  name: `${position}. ${user.username}`,
-                  value: `🍯 ${entry.points.toLocaleString()} mL${team === 'all' ? ` (${capitalizeFirstLetter(entry.team)})` : ''}`,
-                  inline: false
-              });
-          } catch (err) {
-              console.error(`Error fetching user ${entry.discord_id}:`, err);
-          }
-      }
-
-      // Add navigation buttons if there are multiple pages
-      const components: ActionRowBuilder<ButtonBuilder>[] = [];
-      if (totalPages > 1) {
-          const row = new ActionRowBuilder<ButtonBuilder>()
-              .addComponents(
-                  new ButtonBuilder()
-                      .setCustomId(`leaderboard_first_${team}`)
-                      .setLabel('⏮ First')
-                      .setStyle(ButtonStyle.Secondary)
-                      .setDisabled(page === 1),
-                  new ButtonBuilder()
-                      .setCustomId(`leaderboard_prev_${team}`)
-                      .setLabel('◀ Previous')
-                      .setStyle(ButtonStyle.Primary)
-                      .setDisabled(page === 1),
-                  new ButtonBuilder()
-                      .setCustomId(`leaderboard_next_${team}`)
-                      .setLabel('Next ▶')
-                      .setStyle(ButtonStyle.Primary)
-                      .setDisabled(page === totalPages),
-                  new ButtonBuilder()
-                      .setCustomId(`leaderboard_last_${team}`)
-                      .setLabel('Last ⏭')
-                      .setStyle(ButtonStyle.Secondary)
-                      .setDisabled(page === totalPages)
-              );
-          components.push(row);
-      }
-
-      await interaction.reply({
-          embeds: [leaderboardEmbed],
-          components,
-          ephemeral: false
-      });
-
-  } catch (error) {
-      console.error('Error handling leaderboard command:', error);
-      await interaction.reply({
-          content: 'An error occurred while fetching the leaderboard.',
-          ephemeral: true
-      });
-  }
-}
-
-// New function to handle leaderboard page updates via buttons
-async function handleLeaderboardPage(interaction: CommandInteraction, team: string, page: number) {
-  try {
+    const team = interaction.options.getString("team") || "all";
+    const page = interaction.options.getInteger("page") || 1;
     const offset = (page - 1) * ITEMS_PER_PAGE;
 
     // Fetch total count for pagination
     let countQuery = supabase
-        .from('users')
-        .select('*', { count: 'exact', head: true })
-        .not('discord_id', 'is', null);
+      .from('users')
+      .select('*', { count: 'exact', head: true })
+      .not('discord_id', 'is', null);
 
     // Fetch data for current page
     let dataQuery = supabase
-        .from('users')
-        .select('discord_id, points, team')
-        .not('discord_id', 'is', null);
+      .from('users')
+      .select('discord_id, points, team')
+      .not('discord_id', 'is', null);
 
     // Apply team filter if specified
     if (team !== "all") {
-        countQuery = countQuery.eq('team', team);
-        dataQuery = dataQuery.eq('team', team);
+      countQuery = countQuery.eq('team', team);
+      dataQuery = dataQuery.eq('team', team);
     }
 
     // Apply excluded users filter
     EXCLUDED_USERS.forEach(userId => {
-        countQuery = countQuery.neq('discord_id', userId);
-        dataQuery = dataQuery.neq('discord_id', userId);
+      countQuery = countQuery.neq('discord_id', userId);
+      dataQuery = dataQuery.neq('discord_id', userId);
     });
 
     // Execute both queries
     const [countResult, dataResult] = await Promise.all([
-        countQuery,
-        dataQuery
-            .order('points', { ascending: false })
-            .range(offset, offset + ITEMS_PER_PAGE - 1)
+      countQuery,
+      dataQuery
+        .order('points', { ascending: false })
+        .range(offset, offset + ITEMS_PER_PAGE - 1)
     ]);
 
     if (countResult.error || dataResult.error) {
-        throw new Error(countResult.error?.message || dataResult.error?.message);
+      throw new Error(countResult.error?.message || dataResult.error?.message);
     }
 
     const totalCount = countResult.count || 0;
@@ -694,64 +586,174 @@ async function handleLeaderboardPage(interaction: CommandInteraction, team: stri
 
     // Create embed
     const leaderboardEmbed = new EmbedBuilder()
-        .setColor(0xffd700)
-        .setTitle(`🏆 ${team === 'all' ? 'Overall' : capitalizeFirstLetter(team)} Leaderboard`)
-        .setFooter({ text: `Page ${page} of ${totalPages} • Total Players: ${totalCount}` });
+      .setColor(0xffd700)
+      .setTitle(`🏆 ${team === 'all' ? 'Overall' : capitalizeFirstLetter(team)} Leaderboard`)
+      .setFooter({ text: `Page ${page} of ${totalPages} • Total Players: ${totalCount}` });
 
     // Add fields for each player
     for (const [index, entry] of data.entries()) {
-        const position = offset + index + 1;
-        try {
-            const user = await client.users.fetch(entry.discord_id as string);
-            leaderboardEmbed.addFields({
-                name: `${position}. ${user.username}`,
-                value: `🍯 ${entry.points.toLocaleString()} mL${team === 'all' ? ` (${capitalizeFirstLetter(entry.team)})` : ''}`,
-                inline: false
-            });
-        } catch (err) {
-            console.error(`Error fetching user ${entry.discord_id}:`, err);
-        }
+      const position = offset + index + 1;
+      try {
+        const user = await client.users.fetch(entry.discord_id as string);
+        leaderboardEmbed.addFields({
+          name: `${position}. ${user.username}`,
+          value: `🍯 ${entry.points.toLocaleString()} mL${team === 'all' ? ` (${capitalizeFirstLetter(entry.team)})` : ''}`,
+          inline: false
+        });
+      } catch (err) {
+        console.error(`Error fetching user ${entry.discord_id}:`, err);
+      }
     }
 
     // Add navigation buttons if there are multiple pages
     const components: ActionRowBuilder<ButtonBuilder>[] = [];
     if (totalPages > 1) {
-        const row = new ActionRowBuilder<ButtonBuilder>()
-            .addComponents(
-                new ButtonBuilder()
-                    .setCustomId(`leaderboard_first_${team}`)
-                    .setLabel('⏮ First')
-                    .setStyle(ButtonStyle.Secondary)
-                    .setDisabled(page === 1),
-                new ButtonBuilder()
-                    .setCustomId(`leaderboard_prev_${team}`)
-                    .setLabel('◀ Previous')
-                    .setStyle(ButtonStyle.Primary)
-                    .setDisabled(page === 1),
-                new ButtonBuilder()
-                    .setCustomId(`leaderboard_next_${team}`)
-                    .setLabel('Next ▶')
-                    .setStyle(ButtonStyle.Primary)
-                    .setDisabled(page === totalPages),
-                new ButtonBuilder()
-                    .setCustomId(`leaderboard_last_${team}`)
-                    .setLabel('Last ⏭')
-                    .setStyle(ButtonStyle.Secondary)
-                    .setDisabled(page === totalPages)
-            );
-        components.push(row);
+      const row = new ActionRowBuilder<ButtonBuilder>()
+        .addComponents(
+          new ButtonBuilder()
+            .setCustomId(`leaderboard_first_${team}`)
+            .setLabel('⏮ First')
+            .setStyle(ButtonStyle.Secondary)
+            .setDisabled(page === 1),
+          new ButtonBuilder()
+            .setCustomId(`leaderboard_prev_${team}`)
+            .setLabel('◀ Previous')
+            .setStyle(ButtonStyle.Primary)
+            .setDisabled(page === 1),
+          new ButtonBuilder()
+            .setCustomId(`leaderboard_next_${team}`)
+            .setLabel('Next ▶')
+            .setStyle(ButtonStyle.Primary)
+            .setDisabled(page === totalPages),
+          new ButtonBuilder()
+            .setCustomId(`leaderboard_last_${team}`)
+            .setLabel('Last ⏭')
+            .setStyle(ButtonStyle.Secondary)
+            .setDisabled(page === totalPages)
+        );
+      components.push(row);
+    }
+
+    await interaction.reply({
+      embeds: [leaderboardEmbed],
+      components,
+      ephemeral: false
+    });
+
+  } catch (error) {
+    console.error('Error handling leaderboard command:', error);
+    await interaction.reply({
+      content: 'An error occurred while fetching the leaderboard.',
+      ephemeral: true
+    });
+  }
+}
+
+// New function to handle leaderboard page updates via buttons
+async function handleLeaderboardPage(interaction: ButtonInteraction, team: string, page: number) {
+  try {
+    const offset = (page - 1) * ITEMS_PER_PAGE;
+
+    // Fetch total count for pagination
+    let countQuery = supabase
+      .from('users')
+      .select('*', { count: 'exact', head: true })
+      .not('discord_id', 'is', null);
+
+    // Fetch data for current page
+    let dataQuery = supabase
+      .from('users')
+      .select('discord_id, points, team')
+      .not('discord_id', 'is', null);
+
+    // Apply team filter if specified
+    if (team !== "all") {
+      countQuery = countQuery.eq('team', team);
+      dataQuery = dataQuery.eq('team', team);
+    }
+
+    // Apply excluded users filter
+    EXCLUDED_USERS.forEach(userId => {
+      countQuery = countQuery.neq('discord_id', userId);
+      dataQuery = dataQuery.neq('discord_id', userId);
+    });
+
+    // Execute both queries
+    const [countResult, dataResult] = await Promise.all([
+      countQuery,
+      dataQuery
+        .order('points', { ascending: false })
+        .range(offset, offset + ITEMS_PER_PAGE - 1)
+    ]);
+
+    if (countResult.error || dataResult.error) {
+      throw new Error(countResult.error?.message || dataResult.error?.message);
+    }
+
+    const totalCount = countResult.count || 0;
+    const totalPages = Math.ceil(totalCount / ITEMS_PER_PAGE);
+    const data = dataResult.data || [];
+
+    // Create embed
+    const leaderboardEmbed = new EmbedBuilder()
+      .setColor(0xffd700)
+      .setTitle(`🏆 ${team === 'all' ? 'Overall' : capitalizeFirstLetter(team)} Leaderboard`)
+      .setFooter({ text: `Page ${page} of ${totalPages} • Total Players: ${totalCount}` });
+
+    // Add fields for each player
+    for (const [index, entry] of data.entries()) {
+      const position = offset + index + 1;
+      try {
+        const user = await client.users.fetch(entry.discord_id as string);
+        leaderboardEmbed.addFields({
+          name: `${position}. ${user.username}`,
+          value: `🍯 ${entry.points.toLocaleString()} mL${team === 'all' ? ` (${capitalizeFirstLetter(entry.team)})` : ''}`,
+          inline: false
+        });
+      } catch (err) {
+        console.error(`Error fetching user ${entry.discord_id}:`, err);
+      }
+    }
+
+    // Add navigation buttons if there are multiple pages
+    const components: ActionRowBuilder<ButtonBuilder>[] = [];
+    if (totalPages > 1) {
+      const row = new ActionRowBuilder<ButtonBuilder>()
+        .addComponents(
+          new ButtonBuilder()
+            .setCustomId(`leaderboard_first_${team}`)
+            .setLabel('⏮ First')
+            .setStyle(ButtonStyle.Secondary)
+            .setDisabled(page === 1),
+          new ButtonBuilder()
+            .setCustomId(`leaderboard_prev_${team}`)
+            .setLabel('◀ Previous')
+            .setStyle(ButtonStyle.Primary)
+            .setDisabled(page === 1),
+          new ButtonBuilder()
+            .setCustomId(`leaderboard_next_${team}`)
+            .setLabel('Next ▶')
+            .setStyle(ButtonStyle.Primary)
+            .setDisabled(page === totalPages),
+          new ButtonBuilder()
+            .setCustomId(`leaderboard_last_${team}`)
+            .setLabel('Last ⏭')
+            .setStyle(ButtonStyle.Secondary)
+            .setDisabled(page === totalPages)
+        );
+      components.push(row);
     }
 
     await interaction.update({
-        embeds: [leaderboardEmbed],
-        components
+      embeds: [leaderboardEmbed],
+      components
     });
 
   } catch (error) {
     console.error('Error handling leaderboard page:', error);
     await interaction.reply({
-        content: 'An error occurred while updating the leaderboard.',
-        ephemeral: true
+      content: 'An error occurred while updating the leaderboard.',
+      ephemeral: true
     });
   }
 }
@@ -810,20 +812,20 @@ const commands = [
     .setName("leaderboard")
     .setDescription("View the leaderboard")
     .addStringOption(option =>
-        option
-            .setName("team")
-            .setDescription("Filter by team")
-            .addChoices(
-                { name: 'All Teams', value: 'all' },
-                { name: 'Bullas', value: 'bullas' },
-                { name: 'Beras', value: 'beras' }
-            )
+      option
+        .setName("team")
+        .setDescription("Filter by team")
+        .addChoices(
+          { name: 'All Teams', value: 'all' },
+          { name: 'Bullas', value: 'bullas' },
+          { name: 'Beras', value: 'beras' }
+        )
     )
     .addIntegerOption(option =>
-        option
-            .setName("page")
-            .setDescription("Page number")
-            .setMinValue(1)
+      option
+        .setName("page")
+        .setDescription("Page number")
+        .setMinValue(1)
     ),
   new SlashCommandBuilder()
     .setName("snapshot")
@@ -878,6 +880,7 @@ const commands = [
     .setDescription('Update your connected wallet address'),
 ].map(command => command.toJSON());
 
+// Register slash commands on ready
 client.once("ready", async () => {
   console.log("Bot is ready!");
 
@@ -901,9 +904,9 @@ client.once("ready", async () => {
 client.on("interactionCreate", async (interaction) => {
   if (interaction.isCommand()) {
     switch (interaction.commandName) {
-      case "team":  
-          await handleTeamCommand(interaction);
-          break;
+      case "team":
+        await handleTeamCommand(interaction);
+        break;
       case "updateroles":
         if (!hasAdminRole(interaction.member)) {
           await interaction.reply({
@@ -1284,14 +1287,19 @@ client.on("interactionCreate", async (interaction) => {
 
       // Extract current page from embed footer
       const embed = interaction.message.embeds[0];
-      const footerText = embed.footer?.text || '';
-      const match = footerText.match(/Page (\d+) of (\d+)/);
-      if (!match) {
+      if (!embed || !embed.footer || !embed.footer.text) {
         await interaction.reply({ content: "Cannot determine the current page.", ephemeral: true });
         return;
       }
 
-      let currentPage = parseInt(match[1]);
+      const footerText = embed.footer.text;
+      const match = footerText.match(/Page (\d+) of (\d+)/);
+      if (!match) {
+        await interaction.reply({ content: "Cannot parse pagination info.", ephemeral: true });
+        return;
+      }
+
+      const currentPage = parseInt(match[1]);
       const totalPages = parseInt(match[2]);
 
       let newPage = currentPage;
