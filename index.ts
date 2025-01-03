@@ -1,4 +1,4 @@
-// main.ts
+
 import { createClient } from "@supabase/supabase-js";
 import cors from "cors";
 import Decimal from "decimal.js";
@@ -28,7 +28,7 @@ import { scheduleJob } from "node-schedule";
 import { dirname, join } from "path";
 import { fileURLToPath } from "url";
 import { v4 } from "uuid";
-import { Database } from "./supabase"; // Ensure the path is correct
+import { Database } from "./types/supabase"; // Ensure the path is correct
 
 // -------------------
 // Configuration
