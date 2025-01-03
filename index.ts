@@ -210,7 +210,12 @@ async function getTopPlayers(team: string, limit: number) {
     throw error;
   }
 }
-
+interface UserData {
+  discord_id: string;
+  address: string;
+  points: number;
+  team?: string;
+}
 // Enhanced CSV creation with role columns
 function createEnhancedCSV(data: any[], guild: Guild, includeDiscordId: boolean = false) {
   const header = includeDiscordId
@@ -219,6 +224,7 @@ function createEnhancedCSV(data: any[], guild: Guild, includeDiscordId: boolean 
 
   const content = data.map(user => {
     const member = guild.members.cache.get(user.discord_id);
+    const address = user.address ? maskWalletAddress(user.address) : ''; // Handle possibly null address
     
     // Check for both regular and winner roles
     const hasWhitelist = member?.roles.cache.has(WHITELIST_ROLE_ID) || 
@@ -230,8 +236,8 @@ function createEnhancedCSV(data: any[], guild: Guild, includeDiscordId: boolean 
     const hasFreeMint = member?.roles.cache.has(FREE_MINT_ROLE_ID) ? "Y" : "N";
 
     return includeDiscordId
-      ? `${user.discord_id},${maskedAddress},${user.points},${hasWhitelist},${hasMoolaList},${hasFreeMint}`
-      : `${maskedAddress},${user.points},${hasWhitelist},${hasMoolaList},${hasFreeMint}`;
+      ? `${user.discord_id},${address},${user.points},${hasWhitelist},${hasMoolaList},${hasFreeMint}`
+      : `${address},${user.points},${hasWhitelist},${hasMoolaList},${hasFreeMint}`;
   }).join("\n");
 
   return header + content;
@@ -579,7 +585,8 @@ async function handleLeaderboard(interaction: CommandInteraction) {
       // Add fields for each player
       for (const [index, entry] of data.entries()) {
           const position = offset + index + 1;
-          try {
+          try { if (entry.discord_id) {
+            
               const user = await client.users.fetch(entry.discord_id);
               leaderboardEmbed.addFields({
                   name: `${position}. ${user.username}`,
@@ -1228,7 +1235,6 @@ client.on("interactionCreate", async (interaction) => {
     await interaction.message.delete();
   }
 });
-// Add this right after your existing button handler for team selection
 client.on('interactionCreate', async (interaction) => {
   if (!interaction.isButton()) return;
 
@@ -1236,10 +1242,11 @@ client.on('interactionCreate', async (interaction) => {
   if (command !== 'leaderboard') return;
 
   try {
-      // Get current page from footer text
-      const currentEmbed = interaction.message.embeds[0];
-      const footerText = currentEmbed.footer?.text || '';
-      const currentPage = parseInt(footerText.match(/Page (\d+)/)?.[1] || '1');
+    if (!interaction.message?.embeds?.[0]) {
+        throw new Error('Could not find leaderboard embed');
+    }
+    const currentEmbed = interaction.message.embeds[0];
+    const footerText = currentEmbed.footer?.text || '';
 
       let newPage = currentPage;
       switch (action) {
