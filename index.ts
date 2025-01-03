@@ -1,4 +1,3 @@
-
 import { createClient } from "@supabase/supabase-js";
 import cors from "cors";
 import Decimal from "decimal.js";
@@ -34,7 +33,7 @@ import { Database } from "./types/supabase";
 // Configuration
 // -------------------
 
-//  Discord IDs of the users you want to exclude
+// Discord IDs of the users you want to exclude
 const EXCLUDED_USERS = ['649377665496776724', '534027215973646346', '144683637718122496'];
 
 let projects: string[] = [];
@@ -123,14 +122,17 @@ function applyNotEqualFilters(query: any, column: string, values: string[]) {
   });
   return query;
 }
+
 function maskWalletAddress(address: string): string {
   if (!address) return '';
   if (address.length < 6) return address;
   return `${address.slice(0, 2)}...${address.slice(-4)}`;
 }
+
 function capitalizeFirstLetter(str: string) {
   return str.charAt(0).toUpperCase() + str.slice(1);
 }
+
 // Enhanced team points calculation
 async function getFilteredTeamPoints() {
   try {
@@ -210,12 +212,14 @@ async function getTopPlayers(team: string, limit: number) {
     throw error;
   }
 }
+
 interface UserData {
   discord_id: string;
   address: string;
   points: number;
   team?: string;
 }
+
 // Enhanced CSV creation with role columns
 function createEnhancedCSV(data: any[], guild: Guild, includeDiscordId: boolean = false) {
   const header = includeDiscordId
@@ -335,7 +339,7 @@ async function getFilteredLeaderboard(limit: number = 10, team?: string) {
     
     query = applyNotEqualFilters(query, 'discord_id', EXCLUDED_USERS);
 
-    if (team) {
+    if (team && team !== "all") {
       query = query.eq('team', team);
     }
 
@@ -404,6 +408,7 @@ async function handleUpdateWallet(interaction: CommandInteraction) {
     ephemeral: true
   });
 }
+
 async function handleTeamCommand(interaction: CommandInteraction) {
   if (!interaction.guild) return;
   const userId = interaction.user.id;
@@ -528,6 +533,7 @@ async function handleTeamCommand(interaction: CommandInteraction) {
   });
 }
 
+// Your provided handleLeaderboard function
 async function handleLeaderboard(interaction: CommandInteraction) {
   if (!interaction.isChatInputCommand()) return;
 
@@ -579,15 +585,14 @@ async function handleLeaderboard(interaction: CommandInteraction) {
       // Create embed
       const leaderboardEmbed = new EmbedBuilder()
           .setColor(0xffd700)
-          .setTitle(`🏆 ${team === 'all' ? '' : capitalizeFirstLetter(team)} Leaderboard`)
+          .setTitle(`🏆 ${team === 'all' ? 'Overall' : capitalizeFirstLetter(team)} Leaderboard`)
           .setFooter({ text: `Page ${page} of ${totalPages} • Total Players: ${totalCount}` });
 
       // Add fields for each player
       for (const [index, entry] of data.entries()) {
           const position = offset + index + 1;
-          try { if (entry.discord_id) {
-            
-              const user = await client.users.fetch(entry.discord_id);
+          try {
+              const user = await client.users.fetch(entry.discord_id as string);
               leaderboardEmbed.addFields({
                   name: `${position}. ${user.username}`,
                   value: `🍯 ${entry.points.toLocaleString()} mL${team === 'all' ? ` (${capitalizeFirstLetter(entry.team)})` : ''}`,
@@ -641,6 +646,119 @@ async function handleLeaderboard(interaction: CommandInteraction) {
       });
   }
 }
+
+// New function to handle leaderboard page updates via buttons
+async function handleLeaderboardPage(interaction: CommandInteraction, team: string, page: number) {
+  try {
+    const offset = (page - 1) * ITEMS_PER_PAGE;
+
+    // Fetch total count for pagination
+    let countQuery = supabase
+        .from('users')
+        .select('*', { count: 'exact', head: true })
+        .not('discord_id', 'is', null);
+
+    // Fetch data for current page
+    let dataQuery = supabase
+        .from('users')
+        .select('discord_id, points, team')
+        .not('discord_id', 'is', null);
+
+    // Apply team filter if specified
+    if (team !== "all") {
+        countQuery = countQuery.eq('team', team);
+        dataQuery = dataQuery.eq('team', team);
+    }
+
+    // Apply excluded users filter
+    EXCLUDED_USERS.forEach(userId => {
+        countQuery = countQuery.neq('discord_id', userId);
+        dataQuery = dataQuery.neq('discord_id', userId);
+    });
+
+    // Execute both queries
+    const [countResult, dataResult] = await Promise.all([
+        countQuery,
+        dataQuery
+            .order('points', { ascending: false })
+            .range(offset, offset + ITEMS_PER_PAGE - 1)
+    ]);
+
+    if (countResult.error || dataResult.error) {
+        throw new Error(countResult.error?.message || dataResult.error?.message);
+    }
+
+    const totalCount = countResult.count || 0;
+    const totalPages = Math.ceil(totalCount / ITEMS_PER_PAGE);
+    const data = dataResult.data || [];
+
+    // Create embed
+    const leaderboardEmbed = new EmbedBuilder()
+        .setColor(0xffd700)
+        .setTitle(`🏆 ${team === 'all' ? 'Overall' : capitalizeFirstLetter(team)} Leaderboard`)
+        .setFooter({ text: `Page ${page} of ${totalPages} • Total Players: ${totalCount}` });
+
+    // Add fields for each player
+    for (const [index, entry] of data.entries()) {
+        const position = offset + index + 1;
+        try {
+            const user = await client.users.fetch(entry.discord_id as string);
+            leaderboardEmbed.addFields({
+                name: `${position}. ${user.username}`,
+                value: `🍯 ${entry.points.toLocaleString()} mL${team === 'all' ? ` (${capitalizeFirstLetter(entry.team)})` : ''}`,
+                inline: false
+            });
+        } catch (err) {
+            console.error(`Error fetching user ${entry.discord_id}:`, err);
+        }
+    }
+
+    // Add navigation buttons if there are multiple pages
+    const components: ActionRowBuilder<ButtonBuilder>[] = [];
+    if (totalPages > 1) {
+        const row = new ActionRowBuilder<ButtonBuilder>()
+            .addComponents(
+                new ButtonBuilder()
+                    .setCustomId(`leaderboard_first_${team}`)
+                    .setLabel('⏮ First')
+                    .setStyle(ButtonStyle.Secondary)
+                    .setDisabled(page === 1),
+                new ButtonBuilder()
+                    .setCustomId(`leaderboard_prev_${team}`)
+                    .setLabel('◀ Previous')
+                    .setStyle(ButtonStyle.Primary)
+                    .setDisabled(page === 1),
+                new ButtonBuilder()
+                    .setCustomId(`leaderboard_next_${team}`)
+                    .setLabel('Next ▶')
+                    .setStyle(ButtonStyle.Primary)
+                    .setDisabled(page === totalPages),
+                new ButtonBuilder()
+                    .setCustomId(`leaderboard_last_${team}`)
+                    .setLabel('Last ⏭')
+                    .setStyle(ButtonStyle.Secondary)
+                    .setDisabled(page === totalPages)
+            );
+        components.push(row);
+    }
+
+    await interaction.update({
+        embeds: [leaderboardEmbed],
+        components
+    });
+
+  } catch (error) {
+    console.error('Error handling leaderboard page:', error);
+    await interaction.reply({
+        content: 'An error occurred while updating the leaderboard.',
+        ephemeral: true
+    });
+  }
+}
+
+// -------------------
+// Schedule Role Updates
+// -------------------
 const ENABLE_ROLE_UPDATES = false; // Set this to false during testing
 
 if (ENABLE_ROLE_UPDATES) {
@@ -688,7 +806,7 @@ const commands = [
   new SlashCommandBuilder()
     .setName("warstatus")
     .setDescription("Check the current war status"),
-    new SlashCommandBuilder()
+  new SlashCommandBuilder()
     .setName("leaderboard")
     .setDescription("View the leaderboard")
     .addStringOption(option =>
@@ -779,516 +897,485 @@ client.once("ready", async () => {
   }
 });
 
-// Main command handler
+// Main interaction handler
 client.on("interactionCreate", async (interaction) => {
-  if (!interaction.isCommand()) return;
-
-  switch (interaction.commandName) {
-    case "team":  
-        await handleTeamCommand(interaction);
-        break;
-    case "updateroles":
-      if (!hasAdminRole(interaction.member)) {
-        await interaction.reply({
-          content: "You don't have permission to use this command.",
-          ephemeral: true,
-        });
-        return;
-      }
-    
-      await interaction.deferReply();
-      const guild = interaction.guild;
-      if (guild) {
-        await updateRoles(guild);
-        await interaction.editReply("Roles have been manually updated.");
-      } else {
-        await interaction.editReply("Failed to update roles: Guild not found.");
-      }
-      break;
-
-    case "transfer":
-      if (!hasAdminRole(interaction.member)) {
-        await interaction.reply({
-          content: "You don't have permission to use this command.",
-          ephemeral: true,
-        });
-        return;
-      }
+  if (interaction.isCommand()) {
+    switch (interaction.commandName) {
+      case "team":  
+          await handleTeamCommand(interaction);
+          break;
+      case "updateroles":
+        if (!hasAdminRole(interaction.member)) {
+          await interaction.reply({
+            content: "You don't have permission to use this command.",
+            ephemeral: true,
+          });
+          return;
+        }
       
+        await interaction.deferReply();
+        const guild = interaction.guild;
+        if (guild) {
+          await updateRoles(guild);
+          await interaction.editReply("Roles have been manually updated.");
+        } else {
+          await interaction.editReply("Failed to update roles: Guild not found.");
+        }
+        break;
 
-      const userId = interaction.user.id;
-      const targetUser = interaction.options.getUser("user");
-      const amount = interaction.options.get("amount")?.value as number;
+      case "transfer":
+        if (!hasAdminRole(interaction.member)) {
+          await interaction.reply({
+            content: "You don't have permission to use this command.",
+            ephemeral: true,
+          });
+          return;
+        }
+        
 
-      if (!targetUser || !amount) {
-        await interaction.reply("Please provide a valid user and amount.");
-        return;
-      }
+        const userId = interaction.user.id;
+        const targetUser = interaction.options.getUser("user");
+        const amount = interaction.options.get("amount")?.value as number;
 
-      const { data: senderData, error: senderError } = await supabase
-        .from("users")
-        .select("*")
-        .eq("discord_id", userId)
-        .single();
+        if (!targetUser || !amount) {
+          await interaction.reply("Please provide a valid user and amount.");
+          return;
+        }
 
-      if (senderError || !senderData) {
-        console.error("Error fetching sender:", senderError);
-        await interaction.reply("An error occurred while fetching the sender.");
-        return;
-      }
+        const { data: senderData, error: senderError } = await supabase
+          .from("users")
+          .select("*")
+          .eq("discord_id", userId)
+          .single();
 
-      if (senderData.points < amount) {
-        await interaction.reply("Insufficient points to transfer.");
-        return;
-      }
+        if (senderError || !senderData) {
+          console.error("Error fetching sender:", senderError);
+          await interaction.reply("An error occurred while fetching the sender.");
+          return;
+        }
 
-      const { data: receiverData, error: receiverError } = await supabase
-        .from("users")
-        .select("*")
-        .eq("discord_id", targetUser.id)
-        .single();
+        if (senderData.points < amount) {
+          await interaction.reply("Insufficient points to transfer.");
+          return;
+        }
 
-      if (receiverError) {
-        console.error("Error fetching receiver:", receiverError);
-        await interaction.reply("An error occurred while fetching the receiver.");
-        return;
-      }
+        const { data: receiverData, error: receiverError } = await supabase
+          .from("users")
+          .select("*")
+          .eq("discord_id", targetUser.id)
+          .single();
 
-      if (!receiverData) {
-        await interaction.reply("The specified user does not exist.");
-        return;
-      }
+        if (receiverError) {
+          console.error("Error fetching receiver:", receiverError);
+          await interaction.reply("An error occurred while fetching the receiver.");
+          return;
+        }
 
-      const senderPoints = new Decimal(senderData.points);
-      const receiverPoints = new Decimal(receiverData.points);
-      const transferAmount = new Decimal(amount);
+        if (!receiverData) {
+          await interaction.reply("The specified user does not exist.");
+          return;
+        }
 
-      const updatedSenderPoints = senderPoints.minus(transferAmount);
-      const updatedReceiverPoints = receiverPoints.plus(transferAmount);
+        const senderPoints = new Decimal(senderData.points);
+        const receiverPoints = new Decimal(receiverData.points);
+        const transferAmount = new Decimal(amount);
 
-      const { error: senderUpdateError } = await supabase
-        .from("users")
-        .update({ points: updatedSenderPoints.toNumber() })
-        .eq("discord_id", userId);
+        const updatedSenderPoints = senderPoints.minus(transferAmount);
+        const updatedReceiverPoints = receiverPoints.plus(transferAmount);
 
-      if (senderUpdateError) {
-        console.error("Error updating sender points:", senderUpdateError);
-        await interaction.reply("An error occurred while updating sender points.");
-        return;
-      }
+        const { error: senderUpdateError } = await supabase
+          .from("users")
+          .update({ points: updatedSenderPoints.toNumber() })
+          .eq("discord_id", userId);
 
-      const { error: receiverUpdateError } = await supabase
-        .from("users")
-        .update({ points: updatedReceiverPoints.toNumber() })
-        .eq("discord_id", targetUser.id);
+        if (senderUpdateError) {
+          console.error("Error updating sender points:", senderUpdateError);
+          await interaction.reply("An error occurred while updating sender points.");
+          return;
+        }
 
-      if (receiverUpdateError) {
-        console.error("Error updating receiver points:", receiverUpdateError);
-        await interaction.reply("An error occurred while updating receiver points.");
-        return;
-      }
+        const { error: receiverUpdateError } = await supabase
+          .from("users")
+          .update({ points: updatedReceiverPoints.toNumber() })
+          .eq("discord_id", targetUser.id);
 
-      await interaction.reply(
-        `Successfully transferred ${amount} points to <@${targetUser.id}>.`
-      );
-      break;
+        if (receiverUpdateError) {
+          console.error("Error updating receiver points:", receiverUpdateError);
+          await interaction.reply("An error occurred while updating receiver points.");
+          return;
+        }
 
-    case "wankme":
-      const wankmeUserId = interaction.user.id;
-      const uuid = v4();
-
-      const { data: wankmeUserData, error: wankmeUserError } = await supabase
-        .from("users")
-        .select("*")
-        .eq("discord_id", wankmeUserId)
-        .single();
-
-      if (wankmeUserError) {
-        await interaction.reply({
-          content: "Error checking user data. Please try again later.",
-          ephemeral: true
-        });
-        return;
-      }
-
-      if (wankmeUserData) {
         await interaction.reply(
-          `You have already linked your account. Your linked account: \`${maskWalletAddress(wankmeUserData.address)}\``
+          `Successfully transferred ${amount} points to <@${targetUser.id}>.`
         );
-        return;
-      }
+        break;
 
-      const { error: wankmeTokenError } = await supabase
-        .from("tokens")
-        .insert({ token: uuid, discord_id: wankmeUserId, used: false });
+      case "wankme":
+        const wankmeUserId = interaction.user.id;
+        const uuid = v4();
 
-      if (wankmeTokenError) {
-        console.error("Supabase Error:", wankmeTokenError);
-        await interaction.reply({
-          content: `Error: ${wankmeTokenError.message}`,
-          ephemeral: true,
-        });
-      } else {
-        const vercelUrl = `${process.env.VERCEL_URL}/game?token=${uuid}&discord=${wankmeUserId}`;
-        await interaction.reply({
-          content: `Hey ${interaction.user.username}, to link your Discord account to your address click this link: \n\n${vercelUrl} `,
-          ephemeral: true,
-        });
-      }
-      break;
+        const { data: wankmeUserData, error: wankmeUserError } = await supabase
+          .from("users")
+          .select("*")
+          .eq("discord_id", wankmeUserId)
+          .single();
 
-    case "moola":
-      const moolaUserId = interaction.user.id;
+        if (wankmeUserError) {
+          await interaction.reply({
+            content: "Error checking user data. Please try again later.",
+            ephemeral: true
+          });
+          return;
+        }
 
-      const { data: moolaData, error: moolaError } = await supabase
-        .from("users")
-        .select("*")
-        .eq("discord_id", moolaUserId)
-        .single();
+        if (wankmeUserData) {
+          await interaction.reply(
+            `You have already linked your account. Your linked account: \`${maskWalletAddress(wankmeUserData.address)}\``
+          );
+          return;
+        }
 
-      if (moolaError) {
-        console.error("Error fetching user:", moolaError);
-        await interaction.reply("An error occurred while fetching the user.");
-      } else {
-        const moolaEmbed = new EmbedBuilder()
-          .setColor(0xffd700)
-          .setTitle(`${interaction.user.username}'s moola`)
-          .setDescription(`You have ${moolaData.points} moola. 🍯`)
-          .setThumbnail(interaction.user.displayAvatarURL())
-          .setTimestamp();
+        const { error: wankmeTokenError } = await supabase
+          .from("tokens")
+          .insert({ token: uuid, discord_id: wankmeUserId, used: false });
 
-        await interaction.reply({
-          embeds: [moolaEmbed],
-        });
-      }
-      break;
+        if (wankmeTokenError) {
+          console.error("Supabase Error:", wankmeTokenError);
+          await interaction.reply({
+            content: `Error: ${wankmeTokenError.message}`,
+            ephemeral: true,
+          });
+        } else {
+          const vercelUrl = `${process.env.VERCEL_URL}/game?token=${uuid}&discord=${wankmeUserId}`;
+          await interaction.reply({
+            content: `Hey ${interaction.user.username}, to link your Discord account to your address click this link: \n\n${vercelUrl} `,
+            ephemeral: true,
+          });
+        }
+        break;
 
-    case "warstatus":
-      try {
-        console.log("Fetching war status data...");
-        const teamPoints = await getFilteredTeamPoints();
-        console.log(`Bullas Points: ${teamPoints.bullas}, Beras Points: ${teamPoints.beras}`);
+      case "moola":
+        const moolaUserId = interaction.user.id;
 
-        const warstatusEmbed = new EmbedBuilder()
-          .setTitle("🏆 Moola War Status")
-          .setDescription("Current team standings (excluding admin accounts)")
-          .addFields(
-            {
-              name: "🐂 Bullas",
-              value: `${teamPoints.bullas.toLocaleString()} mL`,
-              inline: true,
-            },
-            {
-              name: "🐻 Beras",
-              value: `${teamPoints.beras.toLocaleString()} mL`,
-              inline: true,
-            }
-          )
-          .setColor("#FF0000")
-          .setTimestamp();
+        const { data: moolaData, error: moolaError } = await supabase
+          .from("users")
+          .select("*")
+          .eq("discord_id", moolaUserId)
+          .single();
 
-        await interaction.reply({ embeds: [warstatusEmbed] });
-        console.log("Warstatus command executed successfully.");
-      } catch (error) {
-        console.error("Error fetching war status:", error);
-        await interaction.reply(
-          "An error occurred while fetching the war status."
-        );
-      }
-      break;
+        if (moolaError) {
+          console.error("Error fetching user:", moolaError);
+          await interaction.reply("An error occurred while fetching the user.");
+        } else {
+          const moolaEmbed = new EmbedBuilder()
+            .setColor(0xffd700)
+            .setTitle(`${interaction.user.username}'s moola`)
+            .setDescription(`You have ${moolaData.points} moola. 🍯`)
+            .setThumbnail(interaction.user.displayAvatarURL())
+            .setTimestamp();
+
+          await interaction.reply({
+            embeds: [moolaEmbed],
+          });
+        }
+        break;
+
+      case "warstatus":
+        try {
+          console.log("Fetching war status data...");
+          const teamPoints = await getFilteredTeamPoints();
+          console.log(`Bullas Points: ${teamPoints.bullas}, Beras Points: ${teamPoints.beras}`);
+
+          const warstatusEmbed = new EmbedBuilder()
+            .setTitle("🏆 Moola War Status")
+            .setDescription("Current team standings (excluding admin accounts)")
+            .addFields(
+              {
+                name: "🐂 Bullas",
+                value: `${teamPoints.bullas.toLocaleString()} mL`,
+                inline: true,
+              },
+              {
+                name: "🐻 Beras",
+                value: `${teamPoints.beras.toLocaleString()} mL`,
+                inline: true,
+              }
+            )
+            .setColor("#FF0000")
+            .setTimestamp();
+
+          await interaction.reply({ embeds: [warstatusEmbed] });
+          console.log("Warstatus command executed successfully.");
+        } catch (error) {
+          console.error("Error fetching war status:", error);
+          await interaction.reply(
+            "An error occurred while fetching the war status."
+          );
+        }
+        break;
 
       case "leaderboard":
         await handleLeaderboard(interaction);
         break;
 
-    case "snapshot":
-      if (!hasAdminRole(interaction.member)) {
-        await interaction.reply({
-          content: "You don't have permission to use this command.",
-          ephemeral: true,
-        });
-        return;
-      }
-
-      await interaction.deferReply();
-
-      try {
-        const teamPoints = await getFilteredTeamPoints();
-        const winningTeam = teamPoints.bullas > teamPoints.beras ? "bullas" : "beras";
-        const losingTeam = winningTeam === "bullas" ? "beras" : "bullas";
-
-        const winningTopPlayers = await getTopPlayers(winningTeam, 2000);
-        const losingTopPlayers = await getTopPlayers(losingTeam, 700);
-        const allPlayers = await getTopPlayers(winningTeam, Number.MAX_SAFE_INTEGER);
-        allPlayers.push(...(await getTopPlayers(losingTeam, Number.MAX_SAFE_INTEGER)));
-        allPlayers.sort((a, b) => b.points - a.points);
-
-        if (!interaction.guild) {
-          await interaction.editReply("Error: Could not find guild.");
+      case "snapshot":
+        if (!hasAdminRole(interaction.member)) {
+          await interaction.reply({
+            content: "You don't have permission to use this command.",
+            ephemeral: true,
+          });
           return;
         }
 
-        const winningCSV = createEnhancedCSV(winningTopPlayers, interaction.guild);
-        const losingCSV = createEnhancedCSV(losingTopPlayers, interaction.guild);
-        const allCSV = createEnhancedCSV(allPlayers, interaction.guild, true);
+        await interaction.deferReply();
 
-        const winningFile = await saveCSV(winningCSV, `top_2000_${winningTeam}.csv`);
-        const losingFile = await saveCSV(losingCSV, `top_700_${losingTeam}.csv`);
-        const allFile = await saveCSV(allCSV, `all_players.csv`);
+        try {
+          const teamPoints = await getFilteredTeamPoints();
+          const winningTeam = teamPoints.bullas > teamPoints.beras ? "bullas" : "beras";
+          const losingTeam = winningTeam === "bullas" ? "beras" : "bullas";
 
-        await interaction.editReply({
-          content: `Here are the snapshot files:`,
-          files: [winningFile, losingFile, allFile],
-        });
+          const winningTopPlayers = await getTopPlayers(winningTeam, 2000);
+          const losingTopPlayers = await getTopPlayers(losingTeam, 700);
+          const allPlayers = await getTopPlayers(winningTeam, Number.MAX_SAFE_INTEGER);
+          allPlayers.push(...(await getTopPlayers(losingTeam, Number.MAX_SAFE_INTEGER)));
+          allPlayers.sort((a, b) => b.points - a.points);
 
-        // Delete temporary files
-        fs.unlinkSync(winningFile);
-        fs.unlinkSync(losingFile);
-        fs.unlinkSync(allFile);
-      } catch (error) {
-        console.error("Error handling snapshot command:", error);
-        await interaction.editReply(
-          "An error occurred while processing the snapshot command."
-        );
-      }
-      break;
+          if (!interaction.guild) {
+            await interaction.editReply("Error: Could not find guild.");
+            return;
+          }
 
-    case "fine":
-      if (!hasAdminRole(interaction.member)) {
-        await interaction.reply({
-          content: "You don't have permission to use this command.",
-          ephemeral: true,
-        });
-        return;
-      }
+          const winningCSV = createEnhancedCSV(winningTopPlayers, interaction.guild);
+          const losingCSV = createEnhancedCSV(losingTopPlayers, interaction.guild);
+          const allCSV = createEnhancedCSV(allPlayers, interaction.guild, true);
 
-      const fineTargetUser = interaction.options.getUser("user");
-      const fineAmount = interaction.options.get("amount")?.value as number;
+          const winningFile = await saveCSV(winningCSV, `top_2000_${winningTeam}.csv`);
+          const losingFile = await saveCSV(losingCSV, `top_700_${losingTeam}.csv`);
+          const allFile = await saveCSV(allCSV, `all_players.csv`);
 
-      if (!fineTargetUser || !fineAmount || fineAmount <= 0) {
-        await interaction.reply("Please provide a valid user and a positive amount.");
-        return;
-      }
+          await interaction.editReply({
+            content: `Here are the snapshot files:`,
+            files: [winningFile, losingFile, allFile],
+          });
 
-      try {
-        const { data: fineUserData, error: fineUserError } = await supabase
-          .from("users")
-          .select("*")
-          .eq("discord_id", fineTargetUser.id)
-          .single();
+          // Delete temporary files
+          fs.unlinkSync(winningFile);
+          fs.unlinkSync(losingFile);
+          fs.unlinkSync(allFile);
+        } catch (error) {
+          console.error("Error handling snapshot command:", error);
+          await interaction.editReply(
+            "An error occurred while processing the snapshot command."
+          );
+        }
+        break;
 
-        if (fineUserError || !fineUserData) {
-          await interaction.reply("User not found or an error occurred.");
+      case "fine":
+        if (!hasAdminRole(interaction.member)) {
+          await interaction.reply({
+            content: "You don't have permission to use this command.",
+            ephemeral: true,
+          });
           return;
         }
 
-        const currentPoints = new Decimal(fineUserData.points);
-        const fineDecimal = new Decimal(fineAmount);
+        const fineTargetUser = interaction.options.getUser("user");
+        const fineAmount = interaction.options.get("amount")?.value as number;
 
-        if (currentPoints.lessThan(fineDecimal)) {
-          await interaction.reply("The user doesn't have enough points for this fine.");
+        if (!fineTargetUser || !fineAmount || fineAmount <= 0) {
+          await interaction.reply("Please provide a valid user and a positive amount.");
           return;
         }
 
-        const updatedPoints = currentPoints.minus(fineDecimal);
+        try {
+          const { data: fineUserData, error: fineUserError } = await supabase
+            .from("users")
+            .select("*")
+            .eq("discord_id", fineTargetUser.id)
+            .single();
 
-        const { error: fineUpdateError } = await supabase
-          .from("users")
-          .update({ points: updatedPoints.toNumber() })
-          .eq("discord_id", fineTargetUser.id);
+          if (fineUserError || !fineUserData) {
+            await interaction.reply("User not found or an error occurred.");
+            return;
+          }
 
-        if (fineUpdateError) {
-          throw new Error("Failed to update user points");
+          const currentPoints = new Decimal(fineUserData.points);
+          const fineDecimal = new Decimal(fineAmount);
+
+          if (currentPoints.lessThan(fineDecimal)) {
+            await interaction.reply("The user doesn't have enough points for this fine.");
+            return;
+          }
+
+          const updatedPoints = currentPoints.minus(fineDecimal);
+
+          const { error: fineUpdateError } = await supabase
+            .from("users")
+            .update({ points: updatedPoints.toNumber() })
+            .eq("discord_id", fineTargetUser.id);
+
+          if (fineUpdateError) {
+            throw new Error("Failed to update user points");
+          }
+
+          await interaction.reply(
+            `Successfully fined <@${fineTargetUser.id}> ${fineAmount} points. Their new balance is ${updatedPoints} points.`
+          );
+        } catch (error) {
+          console.error("Error handling fine command:", error);
+          await interaction.reply("An error occurred while processing the fine command.");
+        }
+        break;
+
+      case "updatewhitelistminimum":
+        if (!interaction.isChatInputCommand()) return;  // type guard
+        
+        if (!hasAdminRole(interaction.member)) {
+          await interaction.reply({
+            content: "You don't have permission to use this command.",
+            ephemeral: true,
+          });
+          return;
         }
 
-        await interaction.reply(
-          `Successfully fined <@${fineTargetUser.id}> ${fineAmount} points. Their new balance is ${updatedPoints} points.`
-        );
-      } catch (error) {
-        console.error("Error handling fine command:", error);
-        await interaction.reply("An error occurred while processing the fine command.");
-      }
-      break;
+        const newMinimum = interaction.options.getInteger("minimum", true); // added true for required
+        const updateTeam = interaction.options.getString("team", true); // added true for required
+        const updateRole = interaction.options.getString("role", true); // added true for required
 
-    case "updatewhitelistminimum":
-      if (!interaction.isChatInputCommand()) return;  // type guard
-      
-      if (!hasAdminRole(interaction.member)) {
-        await interaction.reply({
-          content: "You don't have permission to use this command.",
-          ephemeral: true,
-        });
+        if (newMinimum <= 0) {
+          await interaction.reply("Please provide a valid positive integer for the new minimum.");
+          return;
+        }
+
+        if (updateTeam === "winning") {
+          if (updateRole === "whitelist") winningTeamThresholds.whitelist = newMinimum;
+          else if (updateRole === "moolalist") winningTeamThresholds.moolalist = newMinimum;
+          else if (updateRole === "freemint") winningTeamThresholds.freeMint = newMinimum;
+        } else if (updateTeam === "losing") {
+          if (updateRole === "whitelist") losingTeamThresholds.whitelist = newMinimum;
+          else if (updateRole === "moolalist") losingTeamThresholds.moolalist = newMinimum;
+          else if (updateRole === "freemint") losingTeamThresholds.freeMint = newMinimum;
+        }
+
+        await interaction.reply(`${updateTeam} team ${updateRole} threshold updated to ${newMinimum} MOOLA.`);
+
+        const updateGuild = interaction.guild;
+        if (updateGuild) {
+          await updateRoles(updateGuild);
+          await interaction.followUp("Roles have been updated based on the new minimum.");
+        }
+        break;
+
+      case "updatewallet":
+        await handleUpdateWallet(interaction);
+        break;
+
+      default:
+        break;
+    }
+  } else if (interaction.isButton()) {
+    const customId = interaction.customId;
+
+    // Handle leaderboard pagination buttons
+    if (customId.startsWith("leaderboard_")) {
+      const parts = customId.split("_");
+      const action = parts[1]; // first, prev, next, last
+      const team = parts.slice(2).join("_"); // to handle teams with underscores
+
+      // Extract current page from embed footer
+      const embed = interaction.message.embeds[0];
+      const footerText = embed.footer?.text || '';
+      const match = footerText.match(/Page (\d+) of (\d+)/);
+      if (!match) {
+        await interaction.reply({ content: "Cannot determine the current page.", ephemeral: true });
         return;
       }
 
-      const newMinimum = interaction.options.getInteger("minimum", true); // added true for required
-      const updateTeam = interaction.options.getString("team", true); // added true for required
-      const updateRole = interaction.options.getString("role", true); // added true for required
-
-      if (newMinimum <= 0) {
-        await interaction.reply("Please provide a valid positive integer for the new minimum.");
-        return;
-      }
-
-      if (updateTeam === "winning") {
-        if (updateRole === "whitelist") winningTeamThresholds.whitelist = newMinimum;
-        else if (updateRole === "moolalist") winningTeamThresholds.moolalist = newMinimum;
-        else if (updateRole === "freemint") winningTeamThresholds.freeMint = newMinimum;
-      } else if (updateTeam === "losing") {
-        if (updateRole === "whitelist") losingTeamThresholds.whitelist = newMinimum;
-        else if (updateRole === "moolalist") losingTeamThresholds.moolalist = newMinimum;
-        else if (updateRole === "freemint") losingTeamThresholds.freeMint = newMinimum;
-      }
-
-      await interaction.reply(`${updateTeam} team ${updateRole} threshold updated to ${newMinimum} MOOLA.`);
-
-      const updateGuild = interaction.guild;
-      if (updateGuild) {
-        await updateRoles(updateGuild);
-        await interaction.followUp("Roles have been updated based on the new minimum.");
-      }
-      break;
-
-    case "updatewallet":
-      await handleUpdateWallet(interaction);
-      break;
-
-    default:
-      break;
-  }
-});
-
-// Handle button interactions for team selection
-client.on("interactionCreate", async (interaction) => {
-  if (!interaction.isButton()) return;
-  if (!interaction.member || !interaction.guild) return;
-  const member = interaction.member as GuildMember;
-  const roles = member.roles;
-
-  const bullRole = interaction.guild.roles.cache.get(BULL_ROLE_ID);
-  const bearRole = interaction.guild.roles.cache.get(BEAR_ROLE_ID);
-  const mootardRole = interaction.guild.roles.cache.get(MOOTARD_ROLE_ID);
-
-  if (!bearRole || !bullRole || !mootardRole) return;
-
-  async function removeRolesAndAddTeam(teamRole: Role, teamName: string) {
-    // Remove the Mootard role
-    if (roles.cache.has(MOOTARD_ROLE_ID) && mootardRole) {
-      await roles.remove([mootardRole]);
-    }
-
-    // Remove the opposite team role if present
-    const oppositeRoleId = teamRole.id === BULL_ROLE_ID ? BEAR_ROLE_ID : BULL_ROLE_ID;
-    if (roles.cache.has(oppositeRoleId)) {
-      if (oppositeRoleId === BULL_ROLE_ID && bullRole) {
-        await roles.remove([bullRole]);
-      } else if (bearRole) {
-        await roles.remove([bearRole]);
-      }
-    }
-
-    // Add the new team role
-    await roles.add([teamRole]);
-
-    // Update the user's team in the database
-    const { error } = await supabase
-      .from("users")
-      .update({ team: teamName })
-      .eq("discord_id", interaction.user.id);
-
-    if (error) {
-      console.error(`Error updating user team to ${teamName}:`, error);
-      if (interaction.isRepliable()) {
-        await interaction.reply({
-          content: `An error occurred while joining the ${teamName} team. Please try again.`,
-          ephemeral: true,
-        });
-      }
-      return false;
-    }
-
-    return true;
-  }
-
-  if (interaction.customId === "bullButton") {
-    if (await removeRolesAndAddTeam(bullRole, "bullas")) {
-      if (interaction.isRepliable()) {
-        await interaction.reply({
-          content: "You have joined the Bullas team!",
-          ephemeral: true,
-        });
-      }
-    }
-  } else if (interaction.customId === "bearButton") {
-    if (await removeRolesAndAddTeam(bearRole, "beras")) {
-      if (interaction.isRepliable()) {
-        await interaction.reply({
-          content: "You have joined the Beras team!",
-          ephemeral: true,
-        });
-      }
-    }
-  }
-
-  // Delete the original message
-  if (interaction.message) {
-    await interaction.message.delete();
-  }
-});
-client.on('interactionCreate', async (interaction) => {
-  if (!interaction.isButton()) return;
-
-  const [command, action, team] = interaction.customId.split('_');
-  if (command !== 'leaderboard') return;
-
-  try {
-    if (!interaction.message?.embeds?.[0]) {
-        throw new Error('Could not find leaderboard embed');
-    }
-    const currentEmbed = interaction.message.embeds[0];
-    const footerText = currentEmbed.footer?.text || '';
+      let currentPage = parseInt(match[1]);
+      const totalPages = parseInt(match[2]);
 
       let newPage = currentPage;
       switch (action) {
-          case 'first':
-              newPage = 1;
-              break;
-          case 'prev':
-              newPage = Math.max(1, currentPage - 1);
-              break;
-          case 'next':
-              newPage = currentPage + 1;
-              break;
-          case 'last':
-              newPage = 999999; // This will be capped at the actual last page
-              break;
+        case "first":
+          newPage = 1;
+          break;
+        case "prev":
+          newPage = Math.max(currentPage - 1, 1);
+          break;
+        case "next":
+          newPage = Math.min(currentPage + 1, totalPages);
+          break;
+        case "last":
+          newPage = totalPages;
+          break;
+        default:
+          break;
       }
 
-      // Create a new interaction-like object for handleLeaderboard
-      const fakeInteraction = {
-          ...interaction,
-          commandName: 'leaderboard',
-          options: {
-              getString: () => team,
-              getInteger: () => newPage
-          },
-          isChatInputCommand: () => true
-      } as unknown as CommandInteraction;
+      // Update the leaderboard with the new page
+      await handleLeaderboardPage(interaction, team, newPage);
+    }
 
-      await handleLeaderboard(fakeInteraction);
+    // Handle team selection buttons
+    else if (customId === "bullButton" || customId === "bearButton") {
+      const teamRoleId = customId === "bullButton" ? BULL_ROLE_ID : BEAR_ROLE_ID;
+      const teamName = customId === "bullButton" ? "bullas" : "beras";
+      const teamRole = interaction.guild.roles.cache.get(teamRoleId);
 
-      // Delete the original message since we're sending a new one
-      if (interaction.message.deletable) {
+      if (!teamRole) {
+        await interaction.reply({
+          content: "Team role not found. Please contact an admin.",
+          ephemeral: true,
+        });
+        return;
+      }
+
+      // Remove the Mootard role and opposite team role if present, then add the new team role
+      try {
+        const member = interaction.member as GuildMember;
+        await member.roles.remove([MOOTARD_ROLE_ID]);
+
+        const oppositeRoleId = teamRoleId === BULL_ROLE_ID ? BEAR_ROLE_ID : BULL_ROLE_ID;
+        if (member.roles.cache.has(oppositeRoleId)) {
+          await member.roles.remove(oppositeRoleId);
+        }
+
+        await member.roles.add(teamRole);
+
+        // Update the user's team in the database
+        const { error } = await supabase
+          .from("users")
+          .update({ team: teamName })
+          .eq("discord_id", interaction.user.id);
+
+        if (error) {
+          console.error(`Error updating user team to ${teamName}:`, error);
+          await interaction.reply({
+            content: `An error occurred while joining the ${teamName} team. Please try again.`,
+            ephemeral: true,
+          });
+          return;
+        }
+
+        await interaction.reply({
+          content: `You have joined the ${capitalizeFirstLetter(teamName)} team!`,
+          ephemeral: true,
+        });
+
+        // Delete the original message since we're sending a new one
+        if (interaction.message.deletable) {
           await interaction.message.delete();
+        }
+      } catch (error) {
+        console.error("Error handling team selection button:", error);
+        await interaction.reply({
+          content: "An error occurred while updating your team. Please try again.",
+          ephemeral: true,
+        });
       }
-  } catch (error) {
-      console.error('Error handling leaderboard pagination:', error);
-      await interaction.reply({
-          content: 'An error occurred while updating the leaderboard.',
-          ephemeral: true
-      });
+    }
   }
-})
+});
 
 //  function to handle new member joins
 client.on("guildMemberAdd", async (member) => {
